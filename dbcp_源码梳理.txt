@@ -1,0 +1,10 @@
+BasicDataSource.getConnection()
+	-->createDataSource()//创建数据源dataSource
+		-->jmxRegister() //用jmx支持动态配置
+		-->createConnectionFactory()//创建driverConnectionFactory
+			-->Class.forName(driverClassName)
+			-->
+		-->createPoolableConnectionFactory(driverConnectionFactory)
+		-->createDataSourceInstance()
+		-->startPoolMaintenance()
+	-->dataSource.getConnection()

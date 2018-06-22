@@ -16,3 +16,6 @@ site-content
 /.settings
 /ObjectStore/
 /bin/
+
+.idea
+*.iml
