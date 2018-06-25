@@ -1,10 +1,27 @@
 BasicDataSource.getConnection()
-	-->createDataSource()//创建数据源dataSource
+	-->createDataSource()//创建数据源dataSource,单例
 		-->jmxRegister() //用jmx支持动态配置
 		-->createConnectionFactory()//创建driverConnectionFactory
-			-->Class.forName(driverClassName)
-			-->
+			-->Class.forName(driverClassName)//driverClassName为传入的参数，可以不传此参数，不传时会用DriverManager.getDriver(url)从url中获取,url为传入参数
+			-->connectionProperties.put("user", userName);//userName、passWord为传入参数
+			-->connectionProperties.put("password", password);
+			-->new DriverConnectionFactory(driverToUse, url, connectionProperties);//属性赋值，啥也没做
 		-->createPoolableConnectionFactory(driverConnectionFactory)
+		    -->connectionFactory = new PoolableConnectionFactory(driverConnectionFactory,ObjectNameWrapper.unwrap(registeredJmxObjectName));//属性赋值，啥也没做
+            -->...//这里会set连接池的配置参数，包括validationQuery、validationQueryTimeoutSeconds、connectionInitSqls、defaultReadOnly、defaultAutoCommit、defaultTransactionIsolation、defaultCatalog、cacheState、poolPreparedStatements、maxOpenPreparedStatements、maxConnLifetimeMillis、fastFailValidation、disconnectionSqlCodes、rollbackOnReturn、enableAutoCommitOnReturn、defaultQueryTimeoutSeconds
+            -->validateConnectionFactory(connectionFactory);
+                -->PooledObject<PoolableConnection> p = PoolableConnectionFactory.makeObject();
+                    -->Connection conn=DriverConnectionFactory.createConnection()
+                    -->initializeConnection(conn)
+                        -->ObjectName connJmxName=new ObjectName(dataSourceJmxObjectName.toString() + Constants.JMX_CONNECTION_BASE_EXT + connIndex)//注册到jmx
+
+
+
+
+                -->PoolableConnection conn = p.getObject();
+                -->connectionFactory.activateObject(p);
+                -->connectionFactory.validateConnection(conn);
+                -->connectionFactory.passivateObject(p);
 		-->createDataSourceInstance()
 		-->startPoolMaintenance()
 	-->dataSource.getConnection()
