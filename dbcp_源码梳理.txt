@@ -1,27 +1,47 @@
 BasicDataSource.getConnection()
-	-->createDataSource()//创建数据源dataSource,单例
-		-->jmxRegister() //用jmx支持动态配置
-		-->createConnectionFactory()//创建driverConnectionFactory
+	-->BasicDataSource.createDataSource()//创建数据源dataSource,单例
+		-->BasicDataSource.jmxRegister() //用jmx支持动态配置
+		-->BasicDataSource.createConnectionFactory()//创建driverConnectionFactory
 			-->Class.forName(driverClassName)//driverClassName为传入的参数，可以不传此参数，不传时会用DriverManager.getDriver(url)从url中获取,url为传入参数
 			-->connectionProperties.put("user", userName);//userName、passWord为传入参数
 			-->connectionProperties.put("password", password);
 			-->new DriverConnectionFactory(driverToUse, url, connectionProperties);//属性赋值，啥也没做
-		-->createPoolableConnectionFactory(driverConnectionFactory)
-		    -->connectionFactory = new PoolableConnectionFactory(driverConnectionFactory,ObjectNameWrapper.unwrap(registeredJmxObjectName));//属性赋值，啥也没做
+		-->BasicDataSource.createPoolableConnectionFactory(driverConnectionFactory)//创建“可被连接池管理的连接”的工厂
+		    -->new PoolableConnectionFactory(driverConnectionFactory,ObjectNameWrapper.unwrap(registeredJmxObjectName));//属性赋值，啥也没做
             -->...//这里会set连接池的配置参数，包括validationQuery、validationQueryTimeoutSeconds、connectionInitSqls、defaultReadOnly、defaultAutoCommit、defaultTransactionIsolation、defaultCatalog、cacheState、poolPreparedStatements、maxOpenPreparedStatements、maxConnLifetimeMillis、fastFailValidation、disconnectionSqlCodes、rollbackOnReturn、enableAutoCommitOnReturn、defaultQueryTimeoutSeconds
-            -->validateConnectionFactory(connectionFactory);
-                -->PooledObject<PoolableConnection> p = PoolableConnectionFactory.makeObject();
-                    -->Connection conn=DriverConnectionFactory.createConnection()
-                    -->initializeConnection(conn)
-                        -->ObjectName connJmxName=new ObjectName(dataSourceJmxObjectName.toString() + Constants.JMX_CONNECTION_BASE_EXT + connIndex)//注册到jmx
+            -->PoolableConnectionFactory.validateConnectionFactory(connectionFactory);//验证connectionFactory是否可用
+                -->PoolableConnectionFactory.makeObject();
+                    -->DriverConnectionFactory.createConnection()
+                        -->Driver.connect(connectionString, properties)//使用具体的驱动类去建立连接，并返回
+                    -->PoolableConnectionFactory.initializeConnection(conn)//如果配置了connectionInitSqls，则使用该连接去执行connectionInitSqls，失败抛异常
+                    -->new ObjectName(dataSourceJmxObjectName.toString() + Constants.JMX_CONNECTION_BASE_EXT + connIndex)
+                    -->new PoolableConnection(conn, pool, connJmxName, disconnectionSqlCodes, fastFailValidation);//set属性并注册jmx
+                -->PoolableConnectionFactory.activateObject();//根据配置参数进行一些连接设置,包括defaultQueryTimeoutSeconds等
+                -->PoolableConnectionFactory.validateConnection();//测试连接可用性
+                    -->getInnermostDelegateInternal().prepareStatement()
+                        -->DelegatingConnection.getDelegateInternal()
+                    -->PreparedStatement.executeQuery()
+                -->PoolableConnectionFactory.passivateObject();
+                -->PoolableConnectionFactory.destroyObject(p)
+                    -->PoolableConnection.reallyClose()//释放连接
+        -->BasicDataSource.createConnectionPool(poolableConnectionFactory)
+            -->BasicDataSource.createObjectPool()//创建连接池
+                -->new GenericObjectPool<>(factory, poolConfig, abandonedConfig);//根据配置初始化连接池
+                    -->new LinkedBlockingDeque<>(config.getFairness());
+                    -->GenericObjectPool.setConfig(config);
+                    -->GenericObjectPool.startEvictor(getTimeBetweenEvictionRunsMillis());//设置空闲连接监控器（单独线程），每隔timeBetweenEvictionRunsMillis检查一次空闲连接数.
+                                                                                            如果timeBetweenEvictionRunsMillis没有配置，则不会添加监控器，因此下面的minIdle配置无效
+                        -->BaseGenericObjectPool.Evictor.ensureMinIdle()
+                            -->GenericObjectPool.ensureMinIdle()//如果连接数小于minIdle则一次性新建连接，使数量达到minIdle
+            ...//这里设置配置信息，包括maxIdle、minIdle、maxTotal、maxWaitMillis等
+            -->GenericObjectPool.setSwallowedExceptionListener(new SwallowedExceptionLogger(log, logExpiredConnections));
+            -->GenericObjectPool.setEvictionPolicyClassName(evictionPolicyClassName);
+		-->BasicDataSource.createDataSourceInstance()
+		-->BasicDataSource.startPoolMaintenance()
+	-->BasicDataSource.getConnection()
 
 
 
 
-                -->PoolableConnection conn = p.getObject();
-                -->connectionFactory.activateObject(p);
-                -->connectionFactory.validateConnection(conn);
-                -->connectionFactory.passivateObject(p);
-		-->createDataSourceInstance()
-		-->startPoolMaintenance()
-	-->dataSource.getConnection()
+
+------------------------配置总结---------------------------
