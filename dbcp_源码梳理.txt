@@ -6,6 +6,7 @@ BasicDataSource.getConnection()
 			-->connectionProperties.put("user", userName);//userName、passWord为传入参数
 			-->connectionProperties.put("password", password);
 			-->new DriverConnectionFactory(driverToUse, url, connectionProperties);//属性赋值，啥也没做
+        ------------------------------------------------------------------------------------------------
 		-->BasicDataSource.createPoolableConnectionFactory(driverConnectionFactory)//创建“可被连接池管理的连接”的工厂
 		    -->new PoolableConnectionFactory(driverConnectionFactory,ObjectNameWrapper.unwrap(registeredJmxObjectName));//属性赋值，啥也没做
             -->...//这里会set连接池的配置参数，包括validationQuery、validationQueryTimeoutSeconds、connectionInitSqls、defaultReadOnly、defaultAutoCommit、defaultTransactionIsolation、defaultCatalog、cacheState、poolPreparedStatements、maxOpenPreparedStatements、maxConnLifetimeMillis、fastFailValidation、disconnectionSqlCodes、rollbackOnReturn、enableAutoCommitOnReturn、defaultQueryTimeoutSeconds
@@ -24,21 +25,78 @@ BasicDataSource.getConnection()
                 -->PoolableConnectionFactory.passivateObject();
                 -->PoolableConnectionFactory.destroyObject(p)
                     -->PoolableConnection.reallyClose()//释放连接
-        -->BasicDataSource.createConnectionPool(poolableConnectionFactory)
-            -->BasicDataSource.createObjectPool()//创建连接池
+        ----------------------------------------------------------------------------------------
+        -->BasicDataSource.createConnectionPool(poolableConnectionFactory)//创建连接池
+            -->BasicDataSource.createObjectPool()
                 -->new GenericObjectPool<>(factory, poolConfig, abandonedConfig);//根据配置初始化连接池
                     -->new LinkedBlockingDeque<>(config.getFairness());
                     -->GenericObjectPool.setConfig(config);
-                    -->GenericObjectPool.startEvictor(getTimeBetweenEvictionRunsMillis());//设置空闲连接监控器（单独线程），每隔timeBetweenEvictionRunsMillis检查一次空闲连接数.
+                    -->BaseGenericObjectPool.startEvictor(getTimeBetweenEvictionRunsMillis());//设置空闲连接监控器（单独线程），每隔timeBetweenEvictionRunsMillis检查一次空闲连接数.
                                                                                             如果timeBetweenEvictionRunsMillis没有配置，则不会添加监控器，因此下面的minIdle配置无效
-                        -->BaseGenericObjectPool.Evictor.ensureMinIdle()
-                            -->GenericObjectPool.ensureMinIdle()//如果连接数小于minIdle则一次性新建连接，使数量达到minIdle
+                        -->new Evictor();//守护线程，交给定时任务去执行
+                            -->run()
+                                -->GenericObjectPool.evict();//这里会检查当前连接数 及 连接空闲时间，与配置作对比，做出相应调整
+                                    -->...
+                                -->BaseGenericObjectPool.Evictor.ensureMinIdle()
+                                    -->GenericObjectPool.ensureMinIdle()//如果连接数小于minIdle则一次性新建连接，使数量达到minIdle
+                        -->EvictionTimer.schedule(evictor, delay, delay);//启动定时器
+
             ...//这里设置配置信息，包括maxIdle、minIdle、maxTotal、maxWaitMillis等
-            -->GenericObjectPool.setSwallowedExceptionListener(new SwallowedExceptionLogger(log, logExpiredConnections));
+            -->GenericObjectPool.setSwallowedExceptionListener(new SwallowedExceptionLogger(log, logExpiredConnections));//设置异常监听器，记录日志，除了LifetimeExceededException异常
             -->GenericObjectPool.setEvictionPolicyClassName(evictionPolicyClassName);
+        ----------------------------------------------------------------------------------------
 		-->BasicDataSource.createDataSourceInstance()
-		-->BasicDataSource.startPoolMaintenance()
+		    -->new PoolingDataSource<>(connectionPool)
+		        -->this.pool = pool//使数据源持有连接池引用；并且校验pool中的connectionFactory持有的连接池引用是否和pool是同一个，否则修复
+		    -->PoolingDataSource.setAccessToUnderlyingConnectionAllowed(isAccessToUnderlyingConnectionAllowed())//设置accessToUnderlyingConnectionAllowed，是否允许有 underlying connection(这是啥连接？)
+        ----------------------------------------------------------------------------------------
+		-->for connectionPool.addObject();//新建initialSize个连接放入池中
+		    -->GenericObjectPool.addObject();
+		        -->GenericObjectPool.create();
+		            -->PoolableConnectionFactory.makeObject();
+                        -->DriverConnectionFactory.createConnection()
+                            -->Driver.connect(connectionString, properties)//使用具体的驱动类去建立连接，并返回
+                        -->PoolableConnectionFactory.initializeConnection(conn)//如果配置了connectionInitSqls，则使用该连接去执行connectionInitSqls，失败抛异常
+                        -->new ObjectName(dataSourceJmxObjectName.toString() + Constants.JMX_CONNECTION_BASE_EXT + connIndex)
+                        -->new PoolableConnection(conn, pool, connJmxName, disconnectionSqlCodes, fastFailValidation);//set属性并注册jmx
+                    -->this.allObjects.put(new IdentityWrapper<>(p.getObject()), p)//连接缓存到allObjects Map<IdentityWrapper<T>, PooledObject<T>>,这个map 连接作为key，PooledObject作为value
+                -->GenericObjectPool.addIdleObject(p);
+                    -->PoolableConnectionFactory.passivateObject(p);
+                    -->this.idleObjects.addFirst(p);//将连接缓存到idleObjects中，若配置了filo=true则添加到队头，否则添加到队尾
+        ----------------------------------------------------------------------------------------
+        /***********疑问：上面再初始化连接池时已经设置过了守护线程，这里为什么还要再重新设置一次**************/
+		-->BasicDataSource.startPoolMaintenance()//如果配置了timeBetweenEvictionRunsMillis > 0,则启动线程池守护线程
+		    -->BaseGenericObjectPool.setTimeBetweenEvictionRunsMillis()
+		        -->BaseGenericObjectPool.startEvictor(timeBetweenEvictionRunsMillis)
+		            -->new Evictor();//守护线程，交给定时任务去执行
+                        -->run()
+                            -->GenericObjectPool.evict();//这里会检查当前连接数 及 连接空闲时间，与配置作对比，做出相应调整
+                                -->...
+                            -->BaseGenericObjectPool.Evictor.ensureMinIdle()
+                                -->GenericObjectPool.ensureMinIdle()//如果连接数小于minIdle则一次性新建连接，使数量达到minIdle
+                        -->EvictionTimer.schedule(evictor, delay, delay);//启动定时器
 	-->BasicDataSource.getConnection()
+	    -->PoolingDataSource.getConnection()
+	        -->GenericObjectPool.borrowObject()//从池中获取一个连接
+	            -->GenericObjectPool.borrowObject(getMaxWaitMillis())
+	                -->GenericObjectPool.removeAbandoned(ac)//移除,超时连接
+	                    -->for allObjects//遍历全部连接
+	                        -->PooledObject.markAbandoned();//标记为移除状态，连接外包了一层PooledObject，用以表示连接对应的配置信息：如状态、时长等
+	                            -->state = PooledObjectState.ABANDONED;
+	                        -->GenericObjectPool.invalidateObject(pooledObject.getObject());
+	                            -->GenericObjectPool.destroy(p);
+	                                -->DefaultPooledObject.invalidate()
+	                                    -->state = PooledObjectState.INVALID;
+	                                -->idleObjects.remove(toDestroy);//从空闲连接缓存中移除
+                                    -->allObjects.remove(new IdentityWrapper<>(toDestroy.getObject()));
+                                    -->PoolableConnectionFactory.destroyObject(toDestroy);
+                                        -->PooledObject.getObject().reallyClose();//关闭连接
+                                            -->ObjectNameWrapper.unregisterMBean()
+                                            -->DelegatingStatement.close()//***********疑问，DelegatingPreparedStatement，何时把连接归还给池
+                                            -->DelegatingConnection.closeInternal()
+                                                -->DelegatingConnection.passivate()//遍历traceList，关闭连接对应的所有statement
+	                            -->ensureIdle(1, false)
+	        -->new PoolGuardConnectionWrapper<>(conn)
 
 
 
