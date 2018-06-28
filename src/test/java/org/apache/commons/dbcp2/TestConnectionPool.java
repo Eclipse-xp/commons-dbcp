@@ -67,7 +67,7 @@ public abstract class TestConnectionPool {
     protected abstract Connection getConnection() throws Exception;
 
     protected int getMaxTotal() {
-        return 10;
+        return 3;
     }
 
     protected long getMaxWaitMillis() {

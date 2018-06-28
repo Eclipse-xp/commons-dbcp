@@ -80,7 +80,7 @@ BasicDataSource.getConnection()
 	        -->GenericObjectPool.borrowObject()//从池中获取一个连接
 	            -->GenericObjectPool.borrowObject(getMaxWaitMillis())
 	                -->GenericObjectPool.removeAbandoned(ac)//移除,超时连接
-	                    -->for allObjects//遍历全部连接
+	                    -->for allObjects//遍历全部连接,pooledObject.getState() == PooledObjectState.ALLOCATED && pooledObject.getLastUsedTime() <= timeout
 	                        -->PooledObject.markAbandoned();//标记为移除状态，连接外包了一层PooledObject，用以表示连接对应的配置信息：如状态、时长等
 	                            -->state = PooledObjectState.ABANDONED;
 	                        -->GenericObjectPool.invalidateObject(pooledObject.getObject());
@@ -103,3 +103,7 @@ BasicDataSource.getConnection()
 
 
 ------------------------配置总结---------------------------
+1.getConnection时调用连接池的borrowObject()方法，从池中“借”一个连接出来
+    配置属性中，包含borrow关键字的配置项，就是指在“借”的过程中额外做的操作
+2.连接close时调用连接池的returnObject(obj)方法，把连接“还”给池
+    配置属性中，包含return关键字的配置项，就是指在“还”的过程中额外做的操作

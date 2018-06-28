@@ -47,6 +47,7 @@ import org.junit.Test;
 public class TestBasicDataSource extends TestConnectionPool {
 
     @Override
+    @Test
     protected Connection getConnection() throws Exception {
         return ds.getConnection();
     }
